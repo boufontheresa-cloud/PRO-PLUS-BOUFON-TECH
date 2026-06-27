@@ -1,0 +1,1068 @@
+<html lang="fr"><head>
+<!-- Playables SDK -->
+<script>// Playables SDK v1.0.0
+// Game lifecycle bridge: rAF-based game-ready detection + event communication
+(function() {
+  'use strict';
+
+  // Idempotency: skip if already initialized (e.g., server-side injection
+  // followed by client-side inject-javascript via the Bloks webview component).
+  if (window.playablesSDK) return;
+
+  var HANDLER_NAME = 'playablesGameEventHandler';
+  var ANDROID_BRIDGE_NAME = '_MetaPlayablesBridge';
+  var RAF_FRAME_THRESHOLD = 3;
+
+  var gameReadySent = false;
+  var firstInteractionSent = false;
+  var errorSent = false;
+  var frameCount = 0;
+  var originalRAF = window.requestAnimationFrame;
+
+  // --- Transport Layer ---
+
+  function hasIOSBridge() {
+    return !!(window.webkit &&
+              window.webkit.messageHandlers &&
+              window.webkit.messageHandlers[HANDLER_NAME]);
+  }
+
+  function hasAndroidBridge() {
+    return !!(window[ANDROID_BRIDGE_NAME] &&
+              typeof window[ANDROID_BRIDGE_NAME].postEvent === 'function');
+  }
+
+  function isInIframe() {
+    return !!(window.parent && window.parent !== window);
+  }
+
+  function sendEvent(eventName, payload) {
+    var message = {
+      type: eventName,
+      payload: payload || {},
+      timestamp: Date.now()
+    };
+
+    if (hasIOSBridge()) {
+      try {
+        window.webkit.messageHandlers[HANDLER_NAME].postMessage(message);
+      } catch (e) { /* ignore */ }
+      return;
+    }
+
+    if (hasAndroidBridge()) {
+    try {
+      var p = payload || {};
+      p.__secureToken = window.__fbAndroidBridgeAuthToken || '';
+      p.timestamp = message.timestamp;
+      window[ANDROID_BRIDGE_NAME].postEvent(
+        eventName,
+        JSON.stringify(p)
+      );
+    } catch (e) { /* ignore */ }
+    return;
+  }
+
+    if (isInIframe()) {
+      try {
+        window.parent.postMessage(message, '*');
+      } catch (e) { /* ignore */ }
+      return;
+    }
+  }
+
+  // --- rAF Game-Ready Detection ---
+
+  function onFrame() {
+    if (gameReadySent) return;
+
+    frameCount++;
+    if (frameCount >= RAF_FRAME_THRESHOLD) {
+      gameReadySent = true;
+      sendEvent('game_ready', {
+        frame_count: frameCount,
+        detected_at: Date.now()
+      });
+      return;
+    }
+
+    originalRAF.call(window, onFrame);
+  }
+
+  if (originalRAF) {
+    window.requestAnimationFrame = function(callback) {
+      if (!gameReadySent) {
+        return originalRAF.call(window, function(timestamp) {
+          frameCount++;
+          if (frameCount >= RAF_FRAME_THRESHOLD && !gameReadySent) {
+            gameReadySent = true;
+            sendEvent('game_ready', {
+              frame_count: frameCount,
+              detected_at: Date.now()
+            });
+          }
+          callback(timestamp);
+        });
+      }
+      return originalRAF.call(window, callback);
+    };
+  }
+
+  // --- First User Interaction Detection ---
+
+  function setupFirstInteractionDetection() {
+    var events = ['touchstart', 'mousedown', 'keydown'];
+
+    function onFirstInteraction() {
+      if (firstInteractionSent) return;
+      firstInteractionSent = true;
+      sendEvent('user_interaction_start', null);
+
+      for (var i = 0; i < events.length; i++) {
+        document.removeEventListener(events[i], onFirstInteraction, true);
+      }
+    }
+
+    for (var i = 0; i < events.length; i++) {
+      document.addEventListener(events[i], onFirstInteraction, true);
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', setupFirstInteractionDetection);
+  } else {
+    setupFirstInteractionDetection();
+  }
+
+  // --- Auto Error Capture ---
+
+  window.addEventListener('error', function(event) {
+    if (errorSent) return;
+    errorSent = true;
+    sendEvent('error', {
+      message: event.message || 'Unknown error',
+      source: event.filename || '',
+      lineno: event.lineno || 0,
+      colno: event.colno || 0,
+      auto_captured: true
+    });
+  });
+
+  window.addEventListener('unhandledrejection', function(event) {
+    if (errorSent) return;
+    errorSent = true;
+    var reason = event.reason;
+    sendEvent('error', {
+      message: (reason instanceof Error) ? reason.message : String(reason),
+      type: 'unhandled_promise_rejection',
+      auto_captured: true
+    });
+  });
+
+  // --- Public API ---
+
+  window.playablesSDK = {
+    complete: function(score) {
+      sendEvent('game_ended', {
+        score: score,
+        completed: true
+      });
+    },
+
+    error: function(message) {
+      if (errorSent) return;
+      errorSent = true;
+      sendEvent('error', {
+        message: message || 'Unknown error',
+        auto_captured: false
+      });
+    },
+
+    sendEvent: function(eventName, payload) {
+      if (!eventName || typeof eventName !== 'string') return;
+      sendEvent(eventName, payload);
+    }
+  };
+
+  // Kick off rAF detection in case no game code calls rAF immediately
+  if (originalRAF) {
+    originalRAF.call(window, onFrame);
+  }
+})();</script>
+<!-- PLAYABLE_TOUCH_PATCH_V1 --><script>
+(function() {
+  if (window.__playableTouchPatchInstalled) return;
+  window.__playableTouchPatchInstalled = true;
+  var origAdd = EventTarget.prototype.addEventListener;
+  var blockedTypes = { touchstart: 1, touchmove: 1, wheel: 1 };
+  EventTarget.prototype.addEventListener = function(type, listener, options) {
+    if (blockedTypes[type]) {
+      if (options === undefined || options === null) {
+        options = { passive: true };
+      } else if (typeof options === 'boolean') {
+        options = { capture: options, passive: true };
+      } else {
+        options = Object.assign({}, options, { passive: true });
+      }
+    }
+    return origAdd.call(this, type, listener, options);
+  };
+})();
+</script><script>window.Intl=window.Intl||{};Intl.t=function(s){return(Intl._locale&&Intl._locale[s])||s;};</script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BOUFON TECH ZONE RDC 🇨🇩</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&amp;family=Rajdhani:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+    :root {
+        --neon-cyan: #00ffff;
+        --neon-cyan-dark: #00cfcf;
+        --bg-dark: #0a0a0a;
+        --bg-darker: #050505;
+        --bg-card: #0f0f0f;
+        --text-primary: #e0f7ff;
+        --text-secondary: #a0d9e8;
+        --border-glow: rgba(0, 255, 255, 0.3);
+    }
+
+    * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+    }
+
+    html {
+        scroll-behavior: smooth;
+        overflow-x: hidden;
+    }
+
+    body {
+        font-family: 'Rajdhani', sans-serif;
+        background-color: var(--bg-dark);
+        color: var(--text-primary);
+        line-height: 1.6;
+        overflow-x: hidden;
+        position: relative;
+    }
+
+    /* Cyber Grid Background */
+    body::before {
+        content: '';
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background-image: 
+            linear-gradient(rgba(0, 255, 255, 0.03) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(0, 255, 255, 0.03) 1px, transparent 1px);
+        background-size: 50px 50px;
+        pointer-events: none;
+        z-index: 0;
+    }
+
+    /* Scanlines Effect */
+    body::after {
+        content: '';
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: repeating-linear-gradient(
+            0deg,
+            rgba(0, 0, 0, 0.15),
+            rgba(0, 0, 0, 0.15) 1px,
+            transparent 1px,
+            transparent 2px
+        );
+        pointer-events: none;
+        z-index: 1;
+    }
+
+    .container {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 0 20px;
+        position: relative;
+        z-index: 2;
+    }
+
+    /* Header/Banner */
+    .header {
+        position: relative;
+        background: linear-gradient(135deg, #050505 0%, #0a0a0a 50%, #050505 100%);
+        padding: 30px 0 0;
+        border-bottom: 2px solid var(--neon-cyan);
+        box-shadow: 0 0 30px rgba(0, 255, 255, 0.3), inset 0 -2px 20px rgba(0, 255, 255, 0.1);
+        overflow: hidden;
+    }
+
+    .header::before {
+        content: '';
+        position: absolute;
+        top: -50%;
+        left: -50%;
+        width: 200%;
+        height: 200%;
+        background: radial-gradient(circle, rgba(0, 255, 255, 0.1) 0%, transparent 70%);
+        animation: pulse 4s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+        0%, 100% { opacity: 0.3; transform: scale(1); }
+        50% { opacity: 0.6; transform: scale(1.1); }
+    }
+
+    .header-content {
+        position: relative;
+        z-index: 2;
+        text-align: center;
+        padding-bottom: 25px;
+    }
+
+    .logo {
+        font-family: 'Orbitron', monospace;
+        font-size: clamp(1.5rem, 5vw, 3rem);
+        font-weight: 900;
+        color: var(--neon-cyan);
+        text-transform: uppercase;
+        letter-spacing: 3px;
+        text-shadow: 
+            0 0 10px var(--neon-cyan),
+            0 0 20px var(--neon-cyan),
+            0 0 30px var(--neon-cyan),
+            0 0 40px rgba(0, 255, 255, 0.5);
+        margin-bottom: 20px;
+        animation: flicker 3s infinite alternate;
+    }
+
+    @keyframes flicker {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.95; }
+        25%, 75% { opacity: 0.9; }
+    }
+
+    .logo span {
+        animation: glow-text 2s ease-in-out infinite alternate;
+    }
+
+    @keyframes glow-text {
+        from { text-shadow: 0 0 10px var(--neon-cyan), 0 0 20px var(--neon-cyan); }
+        to { text-shadow: 0 0 20px var(--neon-cyan), 0 0 30px var(--neon-cyan), 0 0 40px var(--neon-cyan); }
+    }
+
+    /* Navigation */
+    .nav {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: clamp(15px, 4vw, 40px);
+        flex-wrap: wrap;
+        padding: 20px 0;
+        background: rgba(0, 255, 255, 0.05);
+        border-top: 1px solid var(--border-glow);
+        border-bottom: 1px solid var(--border-glow);
+        backdrop-filter: blur(10px);
+    }
+
+    .nav a {
+        font-family: 'Orbitron', monospace;
+        color: var(--text-primary);
+        text-decoration: none;
+        font-size: clamp(0.9rem, 2.5vw, 1.1rem);
+        font-weight: 600;
+        padding: 10px 20px;
+        border: 1px solid transparent;
+        border-radius: 4px;
+        transition: all 0.3s ease;
+        position: relative;
+        letter-spacing: 1px;
+    }
+
+    .nav a::before {
+        content: '>';
+        margin-right: 8px;
+        color: var(--neon-cyan);
+        opacity: 0;
+        transition: opacity 0.3s ease;
+    }
+
+    .nav a:hover {
+        color: var(--neon-cyan);
+        border-color: var(--neon-cyan);
+        box-shadow: 0 0 15px rgba(0, 255, 255, 0.5), inset 0 0 15px rgba(0, 255, 255, 0.1);
+        text-shadow: 0 0 10px var(--neon-cyan);
+        transform: translateY(-2px);
+    }
+
+    .nav a:hover::before {
+        opacity: 1;
+    }
+
+    /* Section Styles */
+    section {
+        padding: 80px 0;
+        position: relative;
+    }
+
+    .section-divider {
+        height: 2px;
+        background: linear-gradient(90deg, transparent, var(--neon-cyan), transparent);
+        margin: 0 auto;
+        width: 80%;
+        box-shadow: 0 0 20px var(--neon-cyan);
+        position: relative;
+    }
+
+    .section-divider::before,
+    .section-divider::after {
+        content: '';
+        position: absolute;
+        top: 50%;
+        transform: translateY(-50%);
+        width: 10px;
+        height: 10px;
+        background: var(--neon-cyan);
+        box-shadow: 0 0 15px var(--neon-cyan);
+        border-radius: 50%;
+    }
+
+    .section-divider::before { left: -5px; }
+    .section-divider::after { right: -5px; }
+
+    h2 {
+        font-family: 'Orbitron', monospace;
+        font-size: clamp(1.5rem, 4vw, 2.5rem);
+        font-weight: 800;
+        color: var(--neon-cyan);
+        text-transform: uppercase;
+        margin-bottom: 30px;
+        text-align: center;
+        letter-spacing: 2px;
+        text-shadow: 0 0 20px rgba(0, 255, 255, 0.6);
+        position: relative;
+        display: inline-block;
+        width: 100%;
+    }
+
+    h3 {
+        font-family: 'Orbitron', monospace;
+        font-size: clamp(1.2rem, 3vw, 1.8rem);
+        color: var(--neon-cyan);
+        margin: 30px 0 15px;
+        text-shadow: 0 0 10px rgba(0, 255, 255, 0.5);
+    }
+
+    p {
+        font-size: clamp(1rem, 2.5vw, 1.15rem);
+        color: var(--text-secondary);
+        margin-bottom: 20px;
+        line-height: 1.8;
+    }
+
+    .card {
+        background: var(--bg-card);
+        border: 1px solid var(--border-glow);
+        border-radius: 8px;
+        padding: 30px;
+        margin-bottom: 30px;
+        box-shadow: 0 0 20px rgba(0, 255, 255, 0.1), inset 0 0 40px rgba(0, 255, 255, 0.02);
+        transition: all 0.3s ease;
+        position: relative;
+        overflow: hidden;
+    }
+
+    .card::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: -100%;
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(90deg, transparent, rgba(0, 255, 255, 0.1), transparent);
+        transition: left 0.5s ease;
+    }
+
+    .card:hover {
+        border-color: var(--neon-cyan);
+        box-shadow: 0 0 30px rgba(0, 255, 255, 0.3), inset 0 0 40px rgba(0, 255, 255, 0.05);
+        transform: translateY(-5px);
+    }
+
+    .card:hover::before {
+        left: 100%;
+    }
+
+    .feature-list {
+        list-style: none;
+        margin: 20px 0;
+    }
+
+    .feature-list li {
+        padding: 15px 0 15px 35px;
+        position: relative;
+        font-size: clamp(1rem, 2.5vw, 1.1rem);
+        color: var(--text-secondary);
+        border-bottom: 1px solid rgba(0, 255, 255, 0.1);
+    }
+
+    .feature-list li:last-child {
+        border-bottom: none;
+    }
+
+    .feature-list li::before {
+        content: '▹';
+        position: absolute;
+        left: 0;
+        color: var(--neon-cyan);
+        font-size: 1.5rem;
+        text-shadow: 0 0 10px var(--neon-cyan);
+    }
+
+    /* Buttons */
+    .btn {
+        display: inline-block;
+        font-family: 'Orbitron', monospace;
+        font-weight: 700;
+        text-transform: uppercase;
+        text-decoration: none;
+        padding: 15px 35px;
+        margin: 10px 5px;
+        border: 2px solid var(--neon-cyan);
+        background: transparent;
+        color: var(--neon-cyan);
+        border-radius: 4px;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        position: relative;
+        overflow: hidden;
+        letter-spacing: 1px;
+        font-size: clamp(0.85rem, 2vw, 1rem);
+        box-shadow: 0 0 15px rgba(0, 255, 255, 0.3);
+    }
+
+    .btn::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: -100%;
+        width: 100%;
+        height: 100%;
+        background: var(--neon-cyan);
+        transition: left 0.3s ease;
+        z-index: -1;
+    }
+
+    .btn:hover {
+        color: var(--bg-dark);
+        box-shadow: 0 0 30px rgba(0, 255, 255, 0.8), inset 0 0 20px rgba(0, 255, 255, 0.3);
+        transform: scale(1.05);
+        text-shadow: none;
+    }
+
+    .btn:hover::before {
+        left: 0;
+    }
+
+    .btn-primary {
+        background: var(--neon-cyan);
+        color: var(--bg-dark);
+        box-shadow: 0 0 25px rgba(0, 255, 255, 0.5);
+    }
+
+    .btn-primary::before {
+        background: var(--bg-dark);
+    }
+
+    .btn-primary:hover {
+        color: var(--neon-cyan);
+    }
+
+    /* Service Grid */
+    .service-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 25px;
+        margin-top: 40px;
+    }
+
+    .service-card {
+        background: var(--bg-card);
+        border: 1px solid var(--border-glow);
+        border-radius: 8px;
+        padding: 30px 25px;
+        text-align: center;
+        transition: all 0.3s ease;
+        position: relative;
+        overflow: hidden;
+    }
+
+    .service-card::after {
+        content: '';
+        position: absolute;
+        top: -50%;
+        right: -50%;
+        width: 200%;
+        height: 200%;
+        background: radial-gradient(circle, rgba(0, 255, 255, 0.1) 0%, transparent 70%);
+        opacity: 0;
+        transition: opacity 0.4s ease;
+    }
+
+    .service-card:hover {
+        border-color: var(--neon-cyan);
+        box-shadow: 0 0 40px rgba(0, 255, 255, 0.4);
+        transform: translateY(-10px);
+    }
+
+    .service-card:hover::after {
+        opacity: 1;
+    }
+
+    .service-icon {
+        font-size: 3rem;
+        margin-bottom: 20px;
+        filter: drop-shadow(0 0 10px var(--neon-cyan));
+    }
+
+    .service-card h3 {
+        font-size: 1.3rem;
+        margin: 15px 0;
+    }
+
+    .service-card p {
+        font-size: 1rem;
+        margin-bottom: 25px;
+    }
+
+    /* Highlight boxes */
+    .highlight-box {
+        background: rgba(0, 255, 255, 0.05);
+        border-left: 4px solid var(--neon-cyan);
+        padding: 20px;
+        margin: 25px 0;
+        border-radius: 4px;
+        box-shadow: inset 0 0 20px rgba(0, 255, 255, 0.05);
+    }
+
+    .highlight-box strong {
+        color: var(--neon-cyan);
+        text-shadow: 0 0 5px rgba(0, 255, 255, 0.5);
+    }
+
+    /* Contact Section */
+    .contact-info {
+        background: var(--bg-card);
+        border: 2px solid var(--neon-cyan);
+        border-radius: 8px;
+        padding: 40px;
+        text-align: center;
+        box-shadow: 0 0 40px rgba(0, 255, 255, 0.3), inset 0 0 40px rgba(0, 255, 255, 0.05);
+    }
+
+    .contact-info h3 {
+        margin-bottom: 25px;
+    }
+
+    .contact-link {
+        display: inline-block;
+        color: var(--neon-cyan);
+        text-decoration: none;
+        font-size: clamp(1.1rem, 3vw, 1.3rem);
+        font-weight: 600;
+        margin: 10px 15px;
+        padding: 10px 20px;
+        border: 1px solid var(--border-glow);
+        border-radius: 4px;
+        transition: all 0.3s ease;
+    }
+
+    .contact-link:hover {
+        background: rgba(0, 255, 255, 0.1);
+        box-shadow: 0 0 20px rgba(0, 255, 255, 0.5);
+        text-shadow: 0 0 10px var(--neon-cyan);
+        transform: scale(1.05);
+    }
+
+    .phone-number {
+        font-family: 'Orbitron', monospace;
+        font-size: clamp(1.2rem, 3.5vw, 1.8rem);
+        color: var(--neon-cyan);
+        margin: 20px 0;
+        text-shadow: 0 0 15px rgba(0, 255, 255, 0.6);
+        letter-spacing: 2px;
+    }
+
+    /* Footer */
+    .footer {
+        background: var(--bg-darker);
+        border-top: 2px solid var(--neon-cyan);
+        padding: 40px 0;
+        text-align: center;
+        margin-top: 60px;
+        box-shadow: 0 -5px 30px rgba(0, 255, 255, 0.2);
+    }
+
+    .footer p {
+        color: var(--text-secondary);
+        font-size: 0.95rem;
+    }
+
+    .footer .glitch {
+        font-family: 'Orbitron', monospace;
+        color: var(--neon-cyan);
+        font-weight: 700;
+        text-shadow: 0 0 10px var(--neon-cyan);
+    }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+        section {
+            padding: 50px 0;
+        }
+        
+        .card, .service-card {
+            padding: 20px;
+        }
+        
+        .nav {
+            gap: 10px;
+        }
+        
+        .nav a {
+            padding: 8px 15px;
+        }
+        
+        .service-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+
+    @media (max-width: 390px) {
+        .logo {
+            font-size: 1.3rem;
+            letter-spacing: 1px;
+        }
+        
+        .btn {
+            padding: 12px 20px;
+            font-size: 0.8rem;
+            display: block;
+            width: 100%;
+            margin: 10px 0;
+        }
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar {
+        width: 10px;
+    }
+
+    ::-webkit-scrollbar-track {
+        background: var(--bg-darker);
+    }
+
+    ::-webkit-scrollbar-thumb {
+        background: var(--neon-cyan);
+        border-radius: 5px;
+        box-shadow: 0 0 10px var(--neon-cyan);
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+        background: var(--neon-cyan-dark);
+    }
+</style>
+</head>
+<body>
+    <!-- HEADER / BANDE HORIZONTALE -->
+    <header class="header">
+        <div class="container">
+            <div class="header-content">
+                <h1 class="logo" style="">BOUFON TECH <span>ZONE RDC 🇨🇩</span></h1>
+                <nav class="nav">
+                    <a href="#a-propos">À PROPOS</a>
+                    <a href="#service">SERVICE</a>
+                    <a href="#contact">CONTACT MOI</a>
+                </nav>
+            </div>
+        </div>
+    </header>
+
+    <!-- SECTION PRINCIPALE -->
+    <section id="pourquoi">
+        <div class="container">
+            <h2>🚀 POURQUOI CHOISIR BOUFON TECH ? 🚀</h2>
+            <div class="card">
+                <h3 style="text-align:center; font-size:1.5rem;">Le choix de la performance, l'exigence de la stabilité.</h3>
+                <p style="text-align:center; font-size:1.1rem; margin-bottom:30px;">
+                    Dans un monde numérique où la vitesse est la clé, BOUFON TECH ne se contente pas d'offrir une connexion. 
+                    Nous redéfinissons les standards de votre navigation. Voici pourquoi nous sommes la référence :
+                </p>
+                
+                <ul class="feature-list">
+                    <li><strong>La Vitesse à l'état pur ⚡ :</strong> Nos configurations TLS/SSL sont optimisées pour briser toutes les limites. Avec BOUFON, le ping est réduit au strict minimum pour une expérience fluide.</li>
+                    <li><strong>Fiabilité 100% testée 🛡️ :</strong> Ce n'est pas de la théorie, c'est du résultat. Notre projet a été validé par la communauté pour son invulnérabilité et sa stabilité exemplaire, même aux heures de pointe.</li>
+                    <li><strong>Expertise &amp; Ingénierie 💻 :</strong> Derrière BOUFON TECH, il y a une démarche d'ingénieur. Nous ne nous contentons pas de copier ; nous codons, nous personnalisons et nous adaptons nos outils pour qu'ils travaillent pour VOUS.</li>
+                    <li><strong>Accessibilité totale 🔓 :</strong> Nous croyons que la liberté numérique est un droit. Accédez au meilleur de la technologie, sans contraintes et sans compromis, totalement gratuitement.</li>
+                    <li><strong>Une Communauté vivante 🤝 :</strong> Rejoindre BOUFON, c'est rejoindre une élite. Des mises à jour régulières, un support technique réactif et une équipe qui évolue en temps réel avec les besoins de ses utilisateurs.</li>
+                </ul>
+                
+                <div class="highlight-box" style="text-align:center; margin-top:30px;">
+                    <strong>BOUFON TECH : L'intelligence au service de votre connexion. 🧠🌐</strong>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <div class="section-divider"></div>
+
+    <!-- SECTION SUPPORT -->
+    <section id="support">
+        <div class="container">
+            <h2>🛠️ BESOIN D'ASSISTANCE ? ON EST LÀ ! 🛠️</h2>
+            <div class="card">
+                <h3>Une question ? Un problème technique ?</h3>
+                <p>
+                    L'Ingénieur Boufon ne vous laisse jamais seul. Si vous rencontrez la moindre difficulté avec un fichier, 
+                    ne restez pas dans le flou. 💬 Contactez-moi directement sur ma chaîne WhatsApp officielle pour obtenir de l'aide en temps réel.
+                </p>
+                <div style="text-align:center; margin: 30px 0;">
+                    <a href="https://whatsapp.com/channel/0029VbDIVOKLdQeYjGGw7D0K" class="btn btn-primary" target="_blank">Contacter l'Ingénieur sur WhatsApp</a>
+                </div>
+                
+                <div class="highlight-box">
+                    <strong>⚠️ Note importante pour une connexion optimale :</strong><br>
+                    Pour profiter de la puissance de BOUFON TECH, assurez-vous toujours d'être connecté sur un réseau 4G. 
+                    Nos fichiers sont optimisés pour cette architecture et ne garantissent pas leur pleine efficacité sur les réseaux 3G. 📶🚀
+                </div>
+            </div>
+
+            <div class="card" style="margin-top:40px;">
+                <h2 style="margin-top:0;">💎 POURQUOI PASSER À L'ABONNEMENT BOUFON ? 💎</h2>
+                <h3>Le gratuit, c'est bien. Le premium, c'est l'excellence.</h3>
+                <p>
+                    Vous utilisez les fichiers gratuits ? Vous risquez des coupures intempestives et une connexion instable aux heures de pointe. 
+                    Ne sacrifiez pas votre expérience pour quelques économies. 📉
+                </p>
+                <h3>En choisissant l'ABONNEMENT BOUFON, vous débloquez le plein potentiel :</h3>
+                <ul class="feature-list">
+                    <li><strong>✅ Fiabilité Totale :</strong> Une connexion constante, sans aucune interruption.</li>
+                    <li><strong>✅ Vitesse Maximale :</strong> Profitez du débit le plus élevé possible, sans bridage.</li>
+                    <li><strong>✅ Liberté Illimitée :</strong> Téléchargements lourds, streaming haute définition, matchs en direct ⚽ et films 📺... Regardez tout, sans jamais avoir peur de la coupure.</li>
+                    <li><strong>✅ Priorité Ingénieur :</strong> Un accès direct à des serveurs privés exclusifs pour une expérience VIP.</li>
+                </ul>
+                <div class="highlight-box" style="text-align:center;">
+                    <strong>L'abonnement est l'option la plus intelligente pour ceux qui exigent la perfection. 🏆</strong><br><br>
+                    👉 Passez au niveau supérieur dès aujourd'hui et vivez l'expérience BOUFON sans limites ! 🌐⚡
+                </div>
+                <div style="text-align:center; margin-top:30px;">
+                    <a href="https://whatsapp.com/channel/0029VbDIVOKLdQeYjGGw7D0K" class="btn btn-primary" target="_blank">Obtenir l'Accès VIP Maintenant</a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <div class="section-divider"></div>
+
+    <!-- SECTION PRO PLUS VPN -->
+    <section id="pro-plus">
+        <div class="container">
+            <h2>🌐 PRO PLUS VPN : La Puissance 4G Orange 🍊🧡</h2>
+            <div class="card">
+                <h3>Vivez le haut débit sans compromis.</h3>
+                <p>
+                    L'application PRO PLUS VPN a été configurée avec une précision d'ingénieur pour exploiter la pleine bande passante du réseau Orange 4G 🍊🧡. 
+                    Oubliez les latences et les chargements interminables : notre protocole est synchronisé pour offrir une stabilité de connexion "rock-solid" sur le réseau Orange. 🚀
+                </p>
+                <p>
+                    Que ce soit pour le gaming, le streaming ou le téléchargement massif, PRO PLUS VPN transforme votre signal 4G Orange en une autoroute numérique ultra-rapide. 
+                    Plus de coupures, juste de la performance pure. ⚡
+                </p>
+            </div>
+
+            <div class="card" style="margin-top:40px;">
+                <h2 style="margin-top:0;">🛡️ PRO PLUS VPN : L'Élite du Tunneling 🛡️</h2>
+                <h3>PRO PLUS VPN n'est pas un VPN comme les autres.</h3>
+                <p>
+                    C'est le résultat d'une ingénierie avancée, modifiée et perfectionnée pour offrir une navigation invisible et ultra-sécurisée. 
+                    Avec son interface épurée, ses outils de gestion de payload personnalisables et ses fonctions de cache DNS intégrées, 
+                    PRO PLUS place le contrôle total entre vos mains. 🧠
+                </p>
+                <div class="highlight-box">
+                    <strong>Plus qu'une application, un outil de précision.</strong><br>
+                    Des fonctionnalités antilink pour vos communications WhatsApp, une compatibilité native et une vitesse optimisée font de PRO PLUS 
+                    la référence absolue pour ceux qui ne veulent pas seulement "se connecter", mais qui veulent "dominer le réseau". 🦾🌐
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <div class="section-divider"></div>
+
+    <!-- SECTION SERVICE -->
+    <section id="service">
+        <div class="container">
+            <h2>🚀 LES SERVICES DE L'INGÉNIEUR BOUFON 🚀</h2>
+            <p style="text-align:center; font-size:1.2rem; margin-bottom:40px;">
+                Vous avez un projet ? Passez au niveau supérieur avec l'expertise BOUFON TECH. 🧠⚡
+            </p>
+            
+            <div class="service-grid">
+                <div class="service-card">
+                    <div class="service-icon">📈</div>
+                    <h3>Monétisation TikTok</h3>
+                    <p><strong>Le succès à portée de main</strong></p>
+                    <p>
+                        Vous voulez transformer votre compte TikTok en une véritable source de revenus ? Ne jouez plus au hasard. 
+                        L'Ingénieur Boufon vous guide pour optimiser votre visibilité, comprendre l'algorithme et activer la monétisation.
+                    </p>
+                    <a href="https://whatsapp.com/channel/0029VbDIVOKLdQeYjGGw7D0K" class="btn" target="_blank">👉 Passez chez l'ingénieur et faites décoller vos revenus ! 💰🎥</a>
+                </div>
+
+                <div class="service-card">
+                    <div class="service-icon">🎨</div>
+                    <h3>Design &amp; Identité Visuelle</h3>
+                    <p><strong>Marquez les esprits</strong></p>
+                    <p>
+                        Votre image, c'est votre pouvoir. Besoin d'un logo professionnel, d'un design futuriste ou d'images percutantes pour vos projets ? 
+                        Nous créons des visuels à votre image, à la pointe de la technologie.
+                    </p>
+                    <a href="https://whatsapp.com/channel/0029VbDIVOKLdQeYjGGw7D0K" class="btn" target="_blank">👉 Passez chez l'ingénieur pour un design qui fait la différence ! 🖌️✨</a>
+                </div>
+
+                <div class="service-card">
+                    <div class="service-icon">💎</div>
+                    <h3>Abonnements Premium</h3>
+                    <p><strong>L'excellence sans limites</strong></p>
+                    <p>
+                        Envie de la vitesse maximale, de la stabilité absolue et d'un accès sans aucune coupure ? 
+                        Nos abonnements sont la solution pour ceux qui exigent la perfection pour leurs films, leurs matchs et leurs téléchargements.
+                    </p>
+                    <a href="https://whatsapp.com/channel/0029VbDIVOKLdQeYjGGw7D0K" class="btn" target="_blank">👉 Passez chez l'ingénieur pour obtenir votre accès VIP ! 🏆🌐</a>
+                </div>
+
+                <div class="service-card">
+                    <div class="service-icon">🛠️</div>
+                    <h3>Customisation d'Applications</h3>
+                    <p><strong>Transformez votre vision</strong></p>
+                    <p>
+                        Vous avez une application que vous voulez rendre UNIQUE ? Nous transformons des logiciels existants en VOTRE propre chef-d'œuvre, 
+                        avec votre nom, votre icône et votre identité propre. Soyez le créateur de votre propre tunnel.
+                    </p>
+                    <a href="https://whatsapp.com/channel/0029VbDIVOKLdQeYjGGw7D0K" class="btn" target="_blank">👉 Passez chez l'ingénieur pour devenir le propriétaire de votre propre app ! 🦾📱</a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <div class="section-divider"></div>
+
+    <!-- SECTION À PROPOS / FORMATION -->
+    <section id="a-propos">
+        <div class="container">
+            <h2>🎓 FORMATION BOUFON TECH : L'Élite de l'Ingénierie 🎓</h2>
+            <div class="card">
+                <h3 style="text-align:center;">Ne vous contentez pas de suivre, apprenez à créer.</h3>
+                <p>
+                    La formation chez BOUFON TECH, ce n'est pas de la théorie abstraite, c'est de la pratique pure et de haute précision. 
+                    En tant qu'ingénieur, mon objectif est de vous transmettre les méthodes qui m'ont permis de dominer les réseaux et de concevoir des outils performants. 🧠⚡
+                </p>
+                
+                <h3>Pourquoi choisir la formation Boufon ?</h3>
+                <ul class="feature-list">
+                    <li><strong>✅ Qualité "Haut de Gamme" :</strong> Ici, on ne fait pas les choses à moitié. Chaque module est conçu pour vous offrir une maîtrise technique réelle et applicable immédiatement.</li>
+                    <li><strong>✅ Méthodologie d'Ingénieur :</strong> Apprenez à configurer, à optimiser et à personnaliser vos outils comme un professionnel. Vous ne verrez plus jamais votre smartphone de la même manière.</li>
+                    <li><strong>✅ Support et Exigence :</strong> La qualité de ma formation est à l'image de la stabilité de mes fichiers : irréprochable. Je vous accompagne pour que vous puissiez atteindre le même niveau d'excellence que celui qui a fait le succès de PRO PLUS VPN. 🏆</li>
+                    <li><strong>✅ Devenez un Expert :</strong> De la modification d'APK à la configuration de tunnels complexes, passez de débutant à créateur en un temps record. 🚀</li>
+                </ul>
+                
+                <div class="highlight-box" style="text-align:center; margin-top:30px;">
+                    <strong>La connaissance est la seule limite à votre réussite. 🌐</strong><br><br>
+                    👉 Passez chez l'ingénieur et formez-vous au sommet de la technologie.<br>
+                    Contactez-moi sur WhatsApp pour réserver votre place et entrer dans le cercle des experts. 📲🦾
+                </div>
+                <div style="text-align:center; margin-top:30px;">
+                    <a href="https://whatsapp.com/channel/0029VbDIVOKLdQeYjGGw7D0K" class="btn btn-primary" target="_blank">Réserver Ma Formation</a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <div class="section-divider"></div>
+
+    <!-- SECTION CONTACT -->
+    <section id="contact">
+        <div class="container">
+            <h2>📞 CONTACTEZ L'INGÉNIEUR BOUFON</h2>
+            <div class="contact-info">
+                <h3>Je suis disponible vers ma chaîne WhatsApp et vers mon numéro :</h3>
+                <div class="phone-number">+ 𝟮𝟰𝟯 𝟴𝟭𝟵 𝟲𝟭𝟰 𝟯𝟳𝟵</div>
+                <div style="margin-top:30px;">
+                    <a href="https://whatsapp.com/channel/0029VbDIVOKLdQeYjGGw7D0K" class="contact-link" target="_blank">
+                        💬 Chaîne WhatsApp Officielle
+                    </a>
+                    <a href="tel:+243819614379" class="contact-link">
+                        📱 Appeler Directement
+                    </a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- FOOTER -->
+    <footer class="footer">
+        <div class="container">
+            <p class="glitch">BOUFON TECH ZONE RDC 🇨🇩</p>
+            <p style="margin-top:15px;">© 2024 BOUFON TECH. Ingénierie de Connexion • Performance • Stabilité</p>
+            <p style="margin-top:10px; font-size:0.85rem;">L'intelligence au service de votre connexion 🧠⚡</p>
+        </div>
+    </footer>
+
+    <script>
+        // Smooth scroll offset for anchor links
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+            anchor.addEventListener('click', function (e) {
+                e.preventDefault();
+                const target = document.querySelector(this.getAttribute('href'));
+                if (target) {
+                    const headerOffset = 100;
+                    const elementPosition = target.getBoundingClientRect().top;
+                    const offsetPosition = elementPosition + window.pageYOffset - headerOffset;
+                    window.scrollTo({
+                        top: offsetPosition,
+                        behavior: 'smooth'
+                    });
+                }
+            });
+        });
+
+        // Add cyber glitch effect on scroll
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.style.animation = 'none';
+                    setTimeout(() => {
+                        entry.target.style.animation = '';
+                    }, 10);
+                }
+            });
+        }, { threshold: 0.1 });
+
+        document.querySelectorAll('.card, .service-card').forEach(card => {
+            observer.observe(card);
+        });
+
+        // Terminal cursor effect on logo
+        const logo = document.querySelector('.logo');
+        if (logo) {
+            setInterval(() => {
+                logo.style.textShadow = logo.style.textShadow ? '' : '0 0 40px var(--neon-cyan), 0 0 60px var(--neon-cyan)';
+            }, 2000);
+        }
+    </script>
+<script>(function(){document.addEventListener("click",function(e){var a=e.target.closest("[data-product-id]");if(!a)return;e.preventDefault();var pid=a.getAttribute("data-product-id");if(pid)parent.postMessage({type:"ecto-artifact-link-click",productId:pid},"*")})})();</script>
+
+</body></html>
